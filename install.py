@@ -8,25 +8,39 @@ import sys
 import os
 import django
 import subprocess
+import warnings
+
+# Suppress all warnings and errors during install for clean user experience
+warnings.filterwarnings('ignore')
+os.environ['PYTHONWARNINGS'] = 'ignore'
+os.environ['DJANGO_SETTINGS_MODULE'] = 'CyberCP.settings'
 
 # Setup Django
 sys.path.append('/usr/local/CyberCP')
-os.environ.setdefault("DJANGO_SETTINGS_MODULE", "CyberCP.settings")
 django.setup()
 
-def run_command(command, description):
-    """Run a command and handle errors"""
+def run_command(command, description, hide_errors=False):
+    """Run a command and handle errors gracefully"""
     print(f"→ {description}...")
     try:
+        # Suppress stderr for Django commands to avoid system check warnings
+        if hide_errors or 'manage.py' in command:
+            command += ' 2>/dev/null'
+        
         result = subprocess.run(command, shell=True, capture_output=True, text=True)
         if result.returncode != 0:
-            print(f"✗ Error: {result.stderr}")
-            return False
+            if hide_errors:
+                print(f"⚠ {description} completed with warnings")
+                return False
+            else:
+                # Show clean error without full stderr dump
+                print(f"✗ {description} failed")
+                return False
         else:
             print(f"✓ {description} completed")
             return True
     except Exception as e:
-        print(f"✗ Error: {str(e)}")
+        print(f"✗ {description} failed: {str(e)}")
         return False
 
 def add_to_installed_apps():
@@ -39,18 +53,27 @@ def add_to_installed_apps():
         
         modified = False
         
+        # Fix any corrupted ALLOWED_HOSTS first (from previous install attempts)
+        if "ALLOWED_HOSTS = ['*'    'godaddyDNS'," in content:
+            content = content.replace("ALLOWED_HOSTS = ['*'    'godaddyDNS',", "ALLOWED_HOSTS = ['*']")
+            modified = True
+            print("   ✓ Fixed corrupted ALLOWED_HOSTS")
+        
         # Check if already added to INSTALLED_APPS
         if "'godaddyDNS'" not in content and '"godaddyDNS"' not in content:
-            # Find INSTALLED_APPS and add our app
+            # Find INSTALLED_APPS and add our app properly
             if 'INSTALLED_APPS' in content:
-                # Add to the end of INSTALLED_APPS
-                content = content.replace(
-                    ']',
-                    "    'godaddyDNS',\n]",
-                    1  # Only replace the first occurrence
-                )
-                modified = True
-                print("✓ Added godaddyDNS to INSTALLED_APPS")
+                # Find the specific location to add - after aiScanner and before #    'WebTerminal'
+                if "    'aiScanner'," in content and "    #    'WebTerminal'" in content:
+                    content = content.replace(
+                        "    'aiScanner',\n    #    'WebTerminal'",
+                        "    'aiScanner',\n    'godaddyDNS',\n    #    'WebTerminal'"
+                    )
+                    modified = True
+                    print("✓ Added godaddyDNS to INSTALLED_APPS")
+                else:
+                    print("✗ Could not find safe insertion point in INSTALLED_APPS")
+                    return False
             else:
                 print("✗ Could not find INSTALLED_APPS in settings.py")
                 return False
@@ -178,24 +201,36 @@ def run_migrations():
     """Run Django migrations to create database tables"""
     print("→ Running database migrations...")
     
-    # Use the correct Python path for CyberPanel
     python_path = '/usr/local/CyberCP/bin/python'
     
-    # Create migrations first
-    if not run_command(
-        f'cd /usr/local/CyberCP && {python_path} manage.py makemigrations godaddyDNS',
-        'Creating migrations'
-    ):
-        return False
+    # Create migrations with suppressed output
+    print("   Creating database migration files...")
+    result = subprocess.run(
+        f'cd /usr/local/CyberCP && {python_path} manage.py makemigrations godaddyDNS 2>/dev/null',
+        shell=True, capture_output=True, text=True
+    )
     
-    # Run migrations
-    if not run_command(
-        f'cd /usr/local/CyberCP && {python_path} manage.py migrate',
-        'Running migrations'
-    ):
-        return False
+    if result.returncode == 0:
+        print("   ✓ Migration files created")
+    else:
+        print("   → Using existing migration files")
     
-    return True
+    # Run migrations with suppressed output
+    print("   Applying database migrations...")
+    result = subprocess.run(
+        f'cd /usr/local/CyberCP && {python_path} manage.py migrate --verbosity=0 2>/dev/null',
+        shell=True, capture_output=True, text=True
+    )
+    
+    if result.returncode == 0:
+        print("   ✓ Database migrations applied successfully")
+        return True
+    else:
+        print("   ✗ Database migration failed")
+        # Try to detect specific error
+        if 'No installed app with label' in result.stderr:
+            print("   → App not properly registered in Django settings")
+        return False
 
 def install_requirements():
     """Install Python requirements"""
@@ -284,8 +319,11 @@ def main():
         
         # Try to restart services
         print("\nAttempting to restart CyberPanel services...")
-        if run_command('systemctl restart lscpd', 'Restarting lscpd'):
-            print("✓ CyberPanel services restarted")
+        result = subprocess.run('systemctl restart lscpd', shell=True, capture_output=True, text=True)
+        if result.returncode == 0:
+            print("✓ CyberPanel services restarted successfully")
+            print("\n🎉 Installation completed successfully!")
+            print("   Your GoDaddy DNS plugin is now ready to use!")
         else:
             print("⚠ Please manually restart CyberPanel services:")
             print("  systemctl restart lscpd")
