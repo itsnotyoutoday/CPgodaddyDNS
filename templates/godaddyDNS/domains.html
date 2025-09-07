@@ -1,0 +1,330 @@
+{% load i18n %}
+<div class="row">
+    <div class="col-md-12">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h4>{% trans "GoDaddy Domain Management" %}</h4>
+                <div>
+                    <button type="button" class="btn btn-primary btn-sm" onclick="discoverDomains()">
+                        <i class="fa fa-refresh"></i> {% trans "Discover Domains" %}
+                    </button>
+                    <button type="button" class="btn btn-secondary btn-sm ml-2" onclick="refreshDomainsList()">
+                        <i class="fa fa-reload"></i> {% trans "Refresh" %}
+                    </button>
+                </div>
+            </div>
+            <div class="card-body">
+                {% if needs_discovery %}
+                <div class="alert alert-info">
+                    <h5>{% trans "Domain Discovery Required" %}</h5>
+                    <p>{% trans "Click 'Discover Domains' to scan your GoDaddy account for available domains." %}</p>
+                </div>
+                {% else %}
+
+                <!-- Server Info -->
+                <div class="alert alert-light">
+                    <strong>{% trans "Server IP:" %}</strong> {{ server_ip }}
+                    {% if last_updated %}
+                    <span class="float-right">
+                        <small class="text-muted">{% trans "Last updated:" %} {{ last_updated|date:"M d, Y H:i" }}</small>
+                    </span>
+                    {% endif %}
+                </div>
+
+                <!-- Domain Categories -->
+                <div class="row">
+                    <!-- Server-Hosted Domains -->
+                    <div class="col-md-4">
+                        <div class="card border-success">
+                            <div class="card-header bg-success text-white">
+                                <h5 class="mb-0">
+                                    🟢 {% trans "Server-Hosted" %} ({{ domains_data.server_hosted|length }})
+                                </h5>
+                                <small>{% trans "Domains pointing to this server" %}</small>
+                            </div>
+                            <div class="card-body p-2" style="max-height: 400px; overflow-y: auto;">
+                                {% for domain in domains_data.server_hosted %}
+                                <div class="domain-item border-bottom py-2">
+                                    <div class="d-flex justify-content-between align-items-center">
+                                        <div>
+                                            <strong>{{ domain.domain }}</strong>
+                                            <br>
+                                            <small class="text-muted">
+                                                {% if domain.detected_ips %}
+                                                    IPs: {{ domain.detected_ips|join:", " }}
+                                                {% endif %}
+                                            </small>
+                                        </div>
+                                        <div class="btn-group-vertical btn-group-sm">
+                                            <button class="btn btn-outline-primary btn-xs" onclick="manageDomainDNS('{{ domain.domain }}')">
+                                                DNS
+                                            </button>
+                                            <button class="btn btn-outline-secondary btn-xs" onclick="syncDomain('{{ domain.domain }}')">
+                                                Sync
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <div class="mt-1">
+                                        <div class="form-check form-check-inline">
+                                            <input class="form-check-input" type="checkbox" 
+                                                   id="sync_{{ domain.domain|slugify }}"
+                                                   {% if domain.sync_enabled %}checked{% endif %}
+                                                   onchange="toggleDomainSync('{{ domain.domain }}', this.checked)">
+                                            <label class="form-check-label small" for="sync_{{ domain.domain|slugify }}">
+                                                Auto-sync
+                                            </label>
+                                        </div>
+                                    </div>
+                                </div>
+                                {% empty %}
+                                <p class="text-muted small">No server-hosted domains found</p>
+                                {% endfor %}
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- External Domains -->
+                    <div class="col-md-4">
+                        <div class="card border-warning">
+                            <div class="card-header bg-warning text-dark">
+                                <h5 class="mb-0">
+                                    🟡 {% trans "External" %} ({{ domains_data.external_hosted|length }})
+                                </h5>
+                                <small>{% trans "Hosted elsewhere" %}</small>
+                            </div>
+                            <div class="card-body p-2" style="max-height: 400px; overflow-y: auto;">
+                                {% for domain in domains_data.external_hosted %}
+                                <div class="domain-item border-bottom py-2">
+                                    <div class="d-flex justify-content-between align-items-center">
+                                        <div>
+                                            <strong>{{ domain.domain }}</strong>
+                                            <br>
+                                            <small class="text-muted">
+                                                {% if domain.detected_ips %}
+                                                    Points to: {{ domain.detected_ips.0 }}
+                                                {% endif %}
+                                            </small>
+                                        </div>
+                                        <div class="btn-group-vertical btn-group-sm">
+                                            <button class="btn btn-outline-primary btn-xs" onclick="manageDomainDNS('{{ domain.domain }}')">
+                                                DNS
+                                            </button>
+                                            <button class="btn btn-outline-success btn-xs" onclick="pointToServer('{{ domain.domain }}')">
+                                                Point Here
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <div class="mt-1">
+                                        <div class="form-check form-check-inline">
+                                            <input class="form-check-input" type="checkbox" 
+                                                   id="sync_{{ domain.domain|slugify }}"
+                                                   {% if domain.sync_enabled %}checked{% endif %}
+                                                   onchange="toggleDomainSync('{{ domain.domain }}', this.checked)">
+                                            <label class="form-check-label small" for="sync_{{ domain.domain|slugify }}">
+                                                Auto-sync
+                                            </label>
+                                        </div>
+                                    </div>
+                                </div>
+                                {% empty %}
+                                <p class="text-muted small">No external domains found</p>
+                                {% endfor %}
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Parked Domains -->
+                    <div class="col-md-4">
+                        <div class="card border-secondary">
+                            <div class="card-header bg-secondary text-white">
+                                <h5 class="mb-0">
+                                    ⚪ {% trans "Parked" %} ({{ domains_data.parked|length }})
+                                </h5>
+                                <small>{% trans "No active hosting" %}</small>
+                            </div>
+                            <div class="card-body p-2" style="max-height: 400px; overflow-y: auto;">
+                                {% for domain in domains_data.parked %}
+                                <div class="domain-item border-bottom py-2">
+                                    <div class="d-flex justify-content-between align-items-center">
+                                        <div>
+                                            <strong>{{ domain.domain }}</strong>
+                                            <br>
+                                            <small class="text-muted">Available for setup</small>
+                                        </div>
+                                        <div class="btn-group-vertical btn-group-sm">
+                                            <button class="btn btn-outline-success btn-xs" onclick="setupHosting('{{ domain.domain }}')">
+                                                Setup
+                                            </button>
+                                            <button class="btn btn-outline-primary btn-xs" onclick="manageDomainDNS('{{ domain.domain }}')">
+                                                DNS
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                                {% empty %}
+                                <p class="text-muted small">No parked domains found</p>
+                                {% endfor %}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                {% endif %}
+
+                <!-- Loading overlay -->
+                <div id="domains-loading" class="text-center" style="display: none;">
+                    <div class="spinner-border" role="status">
+                        <span class="sr-only">Loading...</span>
+                    </div>
+                    <p class="mt-2">Discovering domains...</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+function discoverDomains() {
+    // Show loading
+    document.querySelector('.card-body').style.display = 'none';
+    document.getElementById('domains-loading').style.display = 'block';
+
+    fetch('/godaddy/discover-domains', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': getCookie('csrftoken')
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            swal("Success", data.message, "success").then(() => {
+                location.reload();
+            });
+        } else {
+            document.querySelector('.card-body').style.display = 'block';
+            document.getElementById('domains-loading').style.display = 'none';
+            swal("Error", data.error, "error");
+        }
+    })
+    .catch(error => {
+        document.querySelector('.card-body').style.display = 'block';
+        document.getElementById('domains-loading').style.display = 'none';
+        swal("Error", "An error occurred during domain discovery", "error");
+        console.error('Error:', error);
+    });
+}
+
+function toggleDomainSync(domain, enabled) {
+    fetch('/godaddy/toggle-domain-sync', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': getCookie('csrftoken')
+        },
+        body: JSON.stringify({
+            domain: domain,
+            sync_enabled: enabled
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            // Show brief success message
+            console.log(data.message);
+        } else {
+            swal("Error", data.error, "error");
+            // Revert checkbox state
+            document.getElementById('sync_' + domain.replace(/\./g, '_')).checked = !enabled;
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        // Revert checkbox state
+        document.getElementById('sync_' + domain.replace(/\./g, '_')).checked = !enabled;
+    });
+}
+
+function manageDomainDNS(domain) {
+    // Redirect to DNS management page for this domain
+    window.location.href = '/godaddy/manage-records?domain=' + encodeURIComponent(domain);
+}
+
+function syncDomain(domain) {
+    swal({
+        title: "Sync Domain?",
+        text: "This will sync DNS records for " + domain + " with GoDaddy",
+        icon: "info",
+        buttons: true,
+    }).then((willSync) => {
+        if (willSync) {
+            performDomainSync(domain);
+        }
+    });
+}
+
+function performDomainSync(domain) {
+    fetch('/godaddy/manual-sync', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': getCookie('csrftoken')
+        },
+        body: JSON.stringify({domain: domain})
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            swal("Success", data.message, "success");
+        } else {
+            swal("Error", data.error, "error");
+        }
+    })
+    .catch(error => {
+        swal("Error", "Sync failed", "error");
+        console.error('Error:', error);
+    });
+}
+
+function setupHosting(domain) {
+    swal("Info", "Website setup functionality coming soon", "info");
+}
+
+function pointToServer(domain) {
+    swal("Info", "Point to server functionality coming soon", "info");
+}
+
+function refreshDomainsList() {
+    location.reload();
+}
+
+// CSRF token helper
+function getCookie(name) {
+    let cookieValue = null;
+    if (document.cookie && document.cookie !== '') {
+        const cookies = document.cookie.split(';');
+        for (let i = 0; i < cookies.length; i++) {
+            const cookie = cookies[i].trim();
+            if (cookie.substring(0, name.length + 1) === (name + '=')) {
+                cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+                break;
+            }
+        }
+    }
+    return cookieValue;
+}
+</script>
+
+<style>
+.domain-item {
+    transition: background-color 0.2s;
+}
+.domain-item:hover {
+    background-color: #f8f9fa;
+}
+.btn-xs {
+    padding: 0.125rem 0.25rem;
+    font-size: 0.75rem;
+    line-height: 1.4;
+}
+</style>
